@@ -1,0 +1,196 @@
+@name ACF CCIP-RK V3
+@inputs  [Gun Target]:entity [Analysis]
+@outputs [EndPos]:vector [ToF] [OpsCpu]:array
+
+
+@persist [Scale Mv Rk Cost Dt Lk]                            # Option
+@persist [G] [Gv]:vector [Pi T C D ToM Dk Cpu A Ddk Dt2 Dt6] # Constant
+@persist [Base Muzzle]:entity                                # Preprocess
+@persist [V0 K]                                              # Process
+@persist [Pf Vf]:vector [Idt Loop] [EndPos]:vector [Run ToF]
+@persist [Lpf]
+@trigger none
+
+
+runOnTick(1)
+
+
+if (dupefinished()) {reset()}
+if (first()) {
+    # ----- Option ----- #
+    Scale = 5    # CCIP hologram scale
+    Mv    = 0    # Custom muzzle velocity (default = 0)
+    
+    # Analysis
+    Rk    = 2    # Method th              (2 or 4)
+    Cost  = 3000 # Calculation cost       (maximum ops)
+    Dt    = 0.1  # Delta time             (1 tick = 0.01515)
+    
+    # Smoothness of flight time
+    Lk    = 0.5  # Gain                   (0 ~ 1)
+    
+    # ----- Constant ----- #
+        G   = gravity()
+        Gv  = vec(0, 0, -G)
+        Pi  = pi()
+        T   = tickInterval()
+        C   = Gun:acfCaliber()
+        D   = acfDragDiv()
+        
+        ToM = 39.37
+        Dk  = 4*10^6
+        Cpu = 10^6
+        
+        A   = Pi*C^2
+        Ddk = D*Dk
+        Dt2 = Dt/2
+        Dt6 = Dt/6
+        
+    # ----- Function ----- #
+    function entity entity:parentBase() {
+        while (perf(100)) {
+            if (This:parent()) {
+                This = This:parent()
+                if (!This:parent()) {return This}
+            }
+            else {return This}
+        }
+    }
+    
+    function vector entity:acfMuzzlePos() {
+        local Att = This:attachmentPos("muzzle")
+        local Mc  = This:massCenter()
+        return (Att ? Att : Mc)
+    }
+    
+    function entity entity:holoCreate2(I, P:vector, Parent) {
+        holoCreate(I, P, vec(0))
+        if (Parent) {holoParent(I, This)}
+        return holoEntity(I)
+    }
+    
+    # ----- Preprocess ----- #
+    if (Gun) {
+        Base = Gun:parentBase()
+        
+        local Mpos   = Gun:acfMuzzlePos()
+              Muzzle = Gun:holoCreate2(1, Mpos, 1)
+    }
+    
+    rangerPersist(1)        rangerFilter(Gun)
+    holoCreate(2, vec())    holoScale(2, vec(Scale))
+}
+
+
+    # ----- Process ----- #
+if (changed(Gun) & Gun) {reset()}
+if (Gun) {
+    # Position element
+          VoB  = Base:vel()
+    local VoBt = VoB*T
+          Gpos = Gun:massCenter() + VoBt
+          Mpos = Muzzle:pos()     + VoBt
+    
+    
+    # Angle element
+    Ang = Gun:angles()
+    Fwd = Gun:forward()
+    
+    
+    # Drag coefficient
+    local AmmoC = Gun:acfAmmoCount()
+    
+    if (changed(AmmoC) & AmmoC) {
+        local Mvf = Gun:acfMuzzleVel()
+        local M   = Gun:acfProjectileMass()
+              V0  = (Mv ? Mv : Mvf)*ToM
+              
+              #ifndef entity:acfDragCoef()
+              K   = A/(Ddk*M)         # ACF 2
+              #else
+              K   = Gun:acfDragCoef() # ACF 3
+              #endif
+    }
+}
+
+
+# Analysis
+if (V0 & Analysis) {
+    if (changed(Ang) & Ang) {Loop = 1}
+    
+    
+    # Loop
+    while ((opcounter() < Cost) & Loop) {
+        # Before state
+        local P1 = Pf
+        local V1 = Vf
+        local Vk = V1:length()*K          local A1 = Gv - Vk*V1
+        
+        
+        # Runge kutta algorithm
+        switch (Rk) {
+            case 2,
+                local V2 = V1 + A1*Dt     local A2 = Gv - Vk*V2
+                      Pf += Dt2*(V1 + V2)
+                      Vf += Dt2*(A1 + A2)
+            break
+            case 4,
+                local V2 = V1 + A1*Dt2    local A2 = Gv - Vk*V2
+                local V3 = V1 + A2*Dt2    local A3 = Gv - Vk*V3
+                local V4 = V1 + A3*Dt     local A4 = Gv - Vk*V4
+                      Pf += Dt6*(V1 + 2*(V2 + V3) + V4)
+                      Vf += Dt6*(A1 + 2*(A2 + A3) + A4)
+            break
+            default, break
+        }
+        
+        
+        # Flight time
+        Idt += Dt
+        
+        
+        # Raycast
+        local Trace = rangerOffset(P1, Pf)
+        local Hit   = Trace:hit()
+        local Pos   = Trace:pos()
+        
+        if (Target) {
+            local Tpos = Target:pos()
+                  Los1 = (Mpos - Pf):setZ(0):length()
+                  Los2 = (Mpos - Tpos):setZ(0):length()
+        }
+        End = (((Target & (Los1 > Los2)) | Hit) ? 1 : 0)
+        
+        
+        # Loop reset
+        if (End) {
+            EndPos = Pos
+            Run    = 0
+            ToF    = Idt
+        }
+        if (!Run) {
+            Run = 1
+            Idt = Loop = 0
+            Pf  = Mpos
+            Vf  = V0*Fwd + VoB
+        }
+    }
+    
+    
+    # CCIP hologram
+    if (End & Scale) {holoPos(2, EndPos)}
+}
+
+
+# Lowpass filter
+if (Lk) {
+    local Bef = Lpf
+          Lpf = (1 - Lk)*Bef + Lk*ToF
+          ToF = Lpf
+}
+
+
+    OpsCpu = array(ops(), cpuUsage()*Cpu)
+    
+    
+# Made by RuBid ACF CCIP-RK V3 2022.09.01
