@@ -1,4 +1,4 @@
-Garry's Mod ACF ballistic analysis with rune kutta 4 method.
+Garry's Mod ACF ballistic analysis with runge kutta 4 method.
 
 You can test it at trinket python coding website.
 
