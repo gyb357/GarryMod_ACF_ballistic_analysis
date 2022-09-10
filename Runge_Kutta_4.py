@@ -144,6 +144,7 @@ def solve(arc, tolerance):
     
     if ang > 90 | Y > 0 & ang < 0 | loop > LoopLimit:
       print("Solver is terminated")
+      print("Optimal angle:", toDeg(th), "/ Loop:", loop)
       return th
   
   print("Optimal angle:", toDeg(th), "/ Loop:", loop)
