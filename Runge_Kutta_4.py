@@ -1,6 +1,7 @@
 # Garry's mod ACF ballistic analysis with runge kutta
 # trinket python: https://trinket.io/library/trinkets/e0aff07491
 
+
 # ----- Space ----- #
 # Set target distance
 X = 10.0
